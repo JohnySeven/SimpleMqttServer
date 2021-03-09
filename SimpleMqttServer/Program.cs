@@ -10,6 +10,7 @@
 namespace SimpleMqttServer
 {
     using System;
+    using System.Collections.Concurrent;
     using System.Diagnostics.CodeAnalysis;
     using System.IO;
     using System.Linq;
@@ -29,6 +30,7 @@ namespace SimpleMqttServer
     /// </summary>
     public class Program
     {
+        private static readonly ConcurrentDictionary<string, User> clientIdToUser = new ConcurrentDictionary<string, User>();
         /// <summary>
         ///     The main method that starts the service.
         /// </summary>
@@ -51,7 +53,9 @@ namespace SimpleMqttServer
             var config = ReadConfiguration(currentPath);
 
             var optionsBuilder = new MqttServerOptionsBuilder()
-                .WithDefaultEndpoint().WithDefaultEndpointPort(config.Port).WithConnectionValidator(
+                .WithDefaultEndpoint()
+                .WithDefaultEndpointPort(config.Port)
+                .WithConnectionValidator(
                     c =>
                     {
                         var currentUser = config.Users.FirstOrDefault(u => u.UserName == c.Username);
@@ -78,24 +82,57 @@ namespace SimpleMqttServer
                         }
 
                         c.ReasonCode = MqttConnectReasonCode.Success;
+
+                        clientIdToUser.AddOrUpdate(c.ClientId, currentUser, (k, u) => currentUser);
+
                         LogMessage(c, false);
-                    }).WithSubscriptionInterceptor(
+                    })
+                .WithSubscriptionInterceptor(
                     c =>
                     {
-                        c.AcceptSubscription = true;
-                        LogMessage(c, true);
-                    }).WithApplicationMessageInterceptor(
+                        if (clientIdToUser.TryGetValue(c.ClientId, out User connectionUser))
+                        {
+                            foreach (var policy in connectionUser.Policies)
+                            {
+                                if (policy.AllowSubscription && policy.CheckTopic(c.TopicFilter.Topic))
+                                {
+                                    c.AcceptSubscription = true;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            c.AcceptSubscription = false;
+                        }
+
+                        LogMessage(c, c.AcceptSubscription);
+                    })
+                .WithApplicationMessageInterceptor(
                     c =>
                     {
-                        c.AcceptPublish = true;
-                        LogMessage(c);
+                        if (clientIdToUser.TryGetValue(c.ClientId, out User connectionUser))
+                        {
+                            foreach (var policy in connectionUser.Policies)
+                            {
+                                if (policy.AllowSubscription && policy.CheckTopic(c.ApplicationMessage.Topic))
+                                {
+                                    c.AcceptPublish = true;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            c.AcceptPublish = false;
+                        }
+
+                        LogMessage(c, c.AcceptPublish);
                     });
 
             var mqttServer = new MqttFactory().CreateMqttServer();
             mqttServer.StartAsync(optionsBuilder.Build());
             Console.ReadLine();
         }
-
+         
         /// <summary>
         ///     Reads the configuration.
         /// </summary>
@@ -129,7 +166,7 @@ namespace SimpleMqttServer
             {
                 return;
             }
-            
+
             Log.Information(successful ? $"New subscription: ClientId = {context.ClientId}, TopicFilter = {context.TopicFilter}" : $"Subscription failed for clientId = {context.ClientId}, TopicFilter = {context.TopicFilter}");
         }
 
@@ -137,7 +174,7 @@ namespace SimpleMqttServer
         ///     Logs the message from the MQTT message interceptor context.
         /// </summary>
         /// <param name="context">The MQTT message interceptor context.</param>
-        private static void LogMessage(MqttApplicationMessageInterceptorContext context)
+        private static void LogMessage(MqttApplicationMessageInterceptorContext context, bool acceptPublish)
         {
             if (context == null)
             {
@@ -149,7 +186,7 @@ namespace SimpleMqttServer
             Log.Information(
                 $"Message: ClientId = {context.ClientId}, Topic = {context.ApplicationMessage?.Topic},"
                 + $" Payload = {payload}, QoS = {context.ApplicationMessage?.QualityOfServiceLevel},"
-                + $" Retain-Flag = {context.ApplicationMessage?.Retain}");
+                + $" Retain-Flag = {context.ApplicationMessage?.Retain}, Was Accepted={acceptPublish}");
         }
 
         /// <summary> 

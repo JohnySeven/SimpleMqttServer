@@ -2,8 +2,15 @@
   "Port": 1883,
   "Users": [
     {
-      "UserName": "Hans",
-      "Password": "Test"
+      "UserName": "LocalSK",
+      "Password": "localsk1234",
+      "Policy": [
+        {
+          "Topic": "signalk/delta",
+          "AllowSubscription": true,
+          "AllowPublish": true
+        }
+      ]
     }
   ]
 }

@@ -9,6 +9,7 @@
 
 namespace SimpleMqttServer
 {
+    using System.Collections.Generic;
     using System.Diagnostics.CodeAnalysis;
 
     /// <summary>
@@ -26,5 +27,10 @@ namespace SimpleMqttServer
         ///     Gets or sets the password.
         /// </summary>
         public string Password { get; set; }
+        /// <summary>
+        /// Contains user's topic policy
+        /// </summary>
+        public List<Policy> Policies { get; set; } = new List<Policy>();
+
     }
 }
